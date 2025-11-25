@@ -1,0 +1,1079 @@
+CausGT-HS: An Energy-Based Causal MoE-GNN for Causal
+Reasoning
+Shashank Tippanavar - IMT2022014
+Siddharth Palod - IMT2022002
+Kushal Jenamani - IMT2022057
+Shanmukh Praneeth - IMT2022542
+
+DLF
+Contents
+1 Introduction 3
+1.1 Github Link . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . 3
+1.2 Project Overview . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . 3
+2 Discovering Latent Causal Mechanisms from Static, Observational Text 3
+2.1 The Core Problem: . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . 3
+2.2 Abstract: The CausGT-HS solution: . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . 5
+3 The CausGT-HS Architecture: A Detailed Formulation: 6
+3.1 Basic info on the model: . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . 6
+3.1.1 Model inputs: . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . 6
+3.1.2 Model outputs: . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . 6
+3.2 Learning our correlational matricesA W : . . . . . . . . . . . . . . . . . . . . . . . . . . . . 6
+3.3 On-the-fly Mediator-Controlled Causal Prior Generation (C prior) Generation . . . . . . . . . 11
+3.3.1 Active Candidate-Set Expansion (ACE): . . . . . . . . . . . . . . . . . . . . . . . . 11
+3.3.2 CoCaD (Counterfactual Causal-DP) . . . . . . . . . . . . . . . . . . . . . . . . . . 28
+3.4 CausGT-HS: A Self-Supervised, Probabilistic Energy-Based Causal Graph-Token Transformer 54
+3.4.1 Inputs to the CausGT-HS model . . . . . . . . . . . . . . . . . . . . . . . . . . . 54
+3.4.2 CausGT-HS model architecture: . . . . . . . . . . . . . . . . . . . . . . . . . . . . 55
+2
+DLF
+1 Introduction
+1.1 Github Link
+Github Repo Link: https://github.com/MightyShashank/CausGT-HS EBM−project
+1.2 Project Overview
+We solve for the following 3 novelties throughout this project:
+•Causal meta-path discovery
+2 Discovering Latent Causal Mechanisms from Static, Observa-
+tional Text
+2.1 The Core Problem:
+The central goal of advanced information retrieval is to move beyond simple, correlational (which has to
+do only with geometry) extraction to discover deep, explanatory, andcausalmechanisms hidden within
+unstructured text (e.g., PDFs). Current systems, like GraphRAG are all ”correlational engines”, meaning they
+excel at identifying and summarizing explicitly stated relationships (i.e., just the retrieved facts), effectively
+answering”what”and not”why”. Our objective is to build a system that answers”Why is this related?”
+by discovering the underlying causal meta-paths.
+•latent = hidden
+•meta-paths = path of classes and not instances
+•causal = seeing the cause and not just structural similarity.
+In simple terms, the problem is the difference between”what”and”why”.
+Today we are excellent at building KGs that tell us what things are related. But we are terrible at
+building KGs that tell us why they are related, or which ”what” caused the other. This is the”correlation
+vs causation”problem.
+Lets see this with an example:A financial news PDFImagine a news paper article of some company..
+•Current KGs (That ”What”/Correlation):Your system can easily extract a graph like this:
+Company A’s
+Stock
+CEO
+Resignation
+New Regulation
+Announced
+This graph is a “dumb” map. It is flat and undirected. It only tells you that these topics appeared
+together, but it offers no explanation.
+Did the stock fall because the CEO resigned? Or did the new regulation cause the CEO to resign,
+which then caused the stock to fall? A standard Knowledge Graph (KG) cannot tell the difference.
+3
+DLF
+•Our Goal (The ”Why”/Causation):We want to automatically discover the real story - thecausal
+meta-path
+A possible causal chain can be represented as:
+New Regulation
+Announced
+CEO
+Resignation
+Company A’s
+Stock Fall
+Unlike an undirected knowledge graph, this causal structure indicates how one event may influence
+another.
+The Core Challenge
+How can a computer discover this ”why” graph (A→B) when all it has to read is a single,
+static PDF?? This is called the”static observational data trap”. All the computer sees is
+that A and B are ”observed” together, not which one ”acted” first.
+Static observational data trap
+Refers to the methodological pitfalls and limitations that arise when researchers use data collected
+at a single point in time to make conclusions that require information about change, cause, or
+dynamic processes.
+This presents a formidable challenge, which existing methods are unequipped to solve:
+1.The Observational Data Trap:The gold standard methods for causal discovery (e.g., DAG-GNN,
+NOTEARS, PC-Algorithm) are designed for tabular, interventional, or time-series data. They require
+seeing how variables change in response to one another. Document KGs arestatic and purely
+observational. We only have one ”snapshot” of the graph, derived from static text. Causality must
+be inferred from static linguistic cues and world knowledge, not observed changes.
+2.The ”Causality-Blind” GNN:Standard GNNs (GCN, GAT) are fundamentally ”correlation” based.
+Their message-passing mechanisms (even with attention) are typically symettric (same in both di-
+rections of edges). They cannot, by design, differentiate betweenA→B(causation) andA−B
+(correlation).
+3.The Noise of Reality:Real-world knowledge isnt binary. The initial graphG(V,E,R)extracted from a
+PDF is noisy. A superior model must operate on aweighted, multi-relational graph G(V,E,R,W),
+where W represents initial ”correlational” confidences or like proximity.
+4.TheO(N 2)Scalability Bottleneck:Real-world documents (e.g., a 100-page technical manual or
+legal filing) can containN >100,000unique entities. Any algorithm that requires building or comput-
+ingN×Nmatrices (e.g., a full attention mechanism or a dense adjacency matrix) iscomputationally
+infeasible. A good solution must scale linearly or near-linearly (O(N)orO(NlogN)).
+4
+DLF
+We propose a novel architecture,CausGT-W, that solves all the above challenges by creating a new end-
+to-end Graph trannsformer that learns causality by being ”taught” by a LLM’scounterfactual reasoningto
+generate aCausal Prior dataset. Its a self-supervised framework for discovering directed, causal meta-paths
+from static, observational text.
+We do this by not asking the LLM ”is this causal?” but by forcing it to perform counterfactual reasoning
+(”What if...?”) on text snippets. For example, ”If Algorithm A were NOT used, what would be the impact
+on Accuracy?” The answers to these ”what if” questions, which the LLM can infer from its vast world
+knowledge, become our only supervisory signal for causality.
+2.2 Abstract: The CausGT-HS solution:
+We introduceCausGT-HS (An Energy-Based Causal MoE-GNN for Causal Reasoning), a novel,
+end-to-end, dual-stream graph transformer architecture. Its purpose is to transform a noisy, weighted, multi-
+relational, and correlational graph (extracted from a PDF) into a single clean, directed and weighted causal
+meta-path graph.
+Our architecture is founded on 4 key novelties:
+1.End-to-End Weighted Meta-Path Learning:We introduce aWeighted Graph Transformer
+Network (GTN-W)module inside the main architecture. This module learns to compose the input
+weighted correlational paths intolatent, multi-hop, weighted meta-paths(W CorrMeta andW CausalMeta).
+This module is trained end-to-end, guided by the causal loss.
+2.Hierarchical-Sparse Architecture (Solves the scalability issue):This architecture ain’t monoithic.
+It first runs a fast graph-coarsening step to cluster N nodes into C ”supernodes” (C << N). A small,
+dense CausGT model finds theO(C 2)”highway” causal paths. Then, a highly-efficient sparse CausGT
+model runs in parallel within each cluster to find the ”local” paths, reducing theO(N 2)attention
+problem to a linear-timeO(N.k)operation.
+3.Dual-Stream Causal-Transformer:The core of CausGT-W is a Graphormer-based encoder with a
+dual-stream attention mechanism. One stream is acorrelational head(usingW CorrMeta) and the
+other is acausal head(usingW CausalMeta). The causal head usesasymmetric attention
+(WQ ̸=W K) and is explicitly trained to replicate the LLM’s counterfactual reasoning.
+Dual-Stream Causal-Transformer
+A Dual-Stream Transformer is a model architecture where two different data streams (e.g., visual
+and textual, or node and relation, or source and target) are processed separately but interact
+through a specialized attention mechanism.
+So instead of a single Transformer encoding one sequence (as in vanilla BERT or ViT), you have
+two parallel Transformers, each maintaining its own set of representations.
+4.Dynamic Gated Fusion:A learnable gating mechanism (λ) for each node dynamically learns how
+much to trust the correlational stream vs the causal stream, creating robust, context-aware node
+representations.
+5.Mediator-Controlled Counterfactural Distillation: We devise a novel self-supervised paradigm. An
+LLM acts as a ”Generalist Teacher,” performing Mediator-Controlled Counterfactual (MCC) reasoning
+on candidate edges identified by our pipeline. Crucially, it employs Latent Mediator Elicitation (LME)
+to hypothesize unobserved mediating concepts (C inA→C→B) based on its world knowledge. The
+LLM outputs a sparse Causal Prior (C prior) representing direct causal links only. This prior becomes
+the sole supervisory signal for causality, distilling complex, interventional reasoing into our GNN.
+5
+DLF
+This architecture fundamentally distills the slow, symbolic, high-level causal reasoning of an LLM into a
+fast, numerically-stable, GNN architecture, solving the ”static” problem.
+3 The CausGT-HS Architecture: A Detailed Formulation:
+3.1 Basic info on the model:
+3.1.1 Model inputs:
+•Node Features:
+H(0) =X∈R X×din
+, where N = number of nodes (entities) andd in is the initial embedding dimension.
+•Weighted Relational Graphs:A set of K weighted adjacency matrices
+AW ={W 1, W2, . . . , WK}whereW r ∈[0,1] N×N
+Each one of these matrices above matches to one type of single, correlational relationship. Each of
+theW r above represents relationships between any of the N nodes and any of the other N nodes for
+a specific relation r.|E r|is the number of non-zero entries inW r. Let|E|= P|Er|.
+•The Causal PriorC prior: Our GNN is supposed to learn to immitate this. This stores a causal score
+for every possible directed pair from node i to node j.
+3.1.2 Model outputs:
+•The primary output:The causal meta-path graphW CausalMeta ∈[0,1] N×N that represents the
+underlying causal mechanisms. They represent final learned causal strength for any directed path from
+node i to node j.
+•The secondary output:Our GNN’s other job was to update node features. Hence an another output
+isH (final) which are our causal aware node embeddings. This is the final list of node embeddings
+after they have passed through all the causal transformer layers. (So now these embeddings are causal
+aware).
+3.2 Learning our correlational matricesA W :
+This is a one-time, per-document pre-processing that uses the LLM ”Teacher”.
+1.Initial Extraction and Indexing:Here we extract the following:
+•NodesN
+•Sparse graphsA W
+•Inverted IndexT map: For every node this lists all the sentence numbers where that node appears.
+Here we extract the above from say a large pdf (100+pages, potentiallyN >100k entities) efficiently.
+Naive methods face many bottlenecks like:
+•LLM context limits:Feeding entire large documents to LLMs for extraction exceeds context
+windows.
+6
+DLF
+•O(N 2)Pair Explosion:Checking all possible entity pairs for relations is computationally im-
+possible.
+•Redundant LLM Calls:Processing sentence-by-sentence or pair-by-pair leads to excessive, slow,
+and costly LLM queries.
+•Ignoring Structure:Simple text chunking misses relations spanning sections.
+Our entire Setup:
+•Input Parameter:User provides K (A hardcoded desired number of relation matrices, the more
+the better).
+•Input Text (D):The plain text extracted via OCR from the document.
+Example Text (Document D):
+P1:(S1) The XGBoost model (XGB) utilizes gradient boosting (GB) principles. (S2) XGBoost
+provides superior performance (PERF) compared to traditional gradient boosting.
+P2:(S3) We evaluated XGBoost on the ImageNet dataset (IMG). (S4) The performance achieved
+was 92% accuracy (ACC). (S5) Accuracy is a key metric.
+•Sentence Embedder (f embed):A pre-trained sentence embedding model (e.g., all-MiniLM-L6-
+v2 from sentence-transformers).
+•Initialise Outputs:
+–N=ϕ(Our Node set:{(node_id,entity_name)})
+–T map ={}(Mapsnode_idto(paragraph_id,sentence_id)).
+–ExtractedTriplets=[],
+–A W ={W 1, . . . , WK}(Its a set of K empty sparse matrix builders in COO format)
+7
+DLF
+COO format
+AboveW k is not yet a dense matrix, but rather a sparse representation being con-
+structed in the COO format (Coordinate list format).
+In the COO format for sparse matrices, instead of storing all entires of a matrix (most
+of which might be 0s), we only store the coordinates and values of non-zero elements.
+rowsk = [i1, i2, . . .]
+colsk = [j1, j2, . . .]
+datak = [v1, v2, . . .]
+Each triple(i t, jt, vt)represents a nn-zero entry:
+Wk[it, jt] =v t
+Formally:
+Wk ≡ {(rowsk,cols k,data k)}
+where
+∗rows k[i]= source node index of edgei,
+∗cols k[i]= destination node index of edgei,
+∗data k[i]= (optional) weight of edgei.
+So, eachW k starts as an empty list of triplets, ready to be filled with edge connections
+or weighted relationships. Each relation type has its own adjacency structureW k.
+So:
+AW ={W 1, . . . , WK}
+represents K different adjacency builder, one per relation type.
+During computation:
+∗The model will learn or generate which node pairs are connected (and with what
+strength).
+∗Initially, eachW k starts empty (no edges added yet).
+∗Then, as the model discovers or constructs edges, entries get added torow k,
+colsk,data k.
+AW ={W 1, . . . , WK}, W k =SparseMatrixBuilder(rows k,cols k,data k)
+where eachW k will ultimately form an adjacency matrix encoding onetype of relation
+ormeta-pathin the graph.
+AW is a collection of K relational adjacency builder that will later become the weighted
+connectivity patterns (edge) used by the model to reason over the graph.
+TheseW k later on when we materialise or instantiate the adjacency representation
+(i.e., when the model needs to perform matrix multiplication or attention propagation
+using these edges) becomeN×Nmatrix.
+8
+DLF
+Text Parsing and Node extraction (N,T map):
+•Parse Text:Segment D into paragraphs (P p) and sentences (s m). Assign unique IDs. Structure
+Structure=
+
+
+
+Doc:{
+P1: [S1,S2],
+P2: [S3,S4,S5]
+}
+
+
+
+Above
+–S1 = ”The XGBoost model (XGB) utilizes gradient boosting (GB) principles.”
+–S2 = ”XGBoost provides superior performance (PERF) compared to traditional gradient
+boosting.”
+–S3 = ”We evaluated XGBoost on the ImageNet dataset (IMG).”
+–S4 = ”The performance achieved was 92% accuracy (ACC).”
+–S5 = ”Accuracy is a key metric.”
+•Entity Extraction (LLM NER) and Build Node set:Run NER the full text.
+– Prompt:”Extract all significant technical entities. Output as JSON list.”
+– LLM Output:[”XGBoost”, ”gradient boosting”, ”performance”, ”ImageNet”, ”accu-
+racy”]
+– Building Node Set (N):Assign unique IDs.
+N=
+
+
+
+(1,XGBoost),
+(2,gradient boosting),
+(3,performance),
+(4,ImageNet),
+(5,accuracy)
+
+
+
+– BuildT map:We iterate through sentences and nodes and create a mapping for nodes (their
+corresponding IDs) as below:
+Tmap =
+
+
+
+1 : [(P 1, S1),(P 1, S2),(P 2, S3)],// XGBoost
+2 : [(P 1, S1),(P 1, S2)],// gradient boosting
+3 : [(P 1, S2),(P 2, S4)],// performance
+4 : [(P 2, S3)],// ImageNet
+5 : [(P 2, S4),(P 2, S5)]// accuracy
+
+
+
+9
+DLF
+Note
+–P p:
+This simply refers to a specific paragraph in your document, identified by its index
+or ID p.
+Ex:P 1 is the first paragraph,P 2 is the second paragraph.
+–N p:
+Refers to nodes in paragraph p. This is the set of node IDs (representing entities)
+that appear anywhere within that specific paragraphP p.
+Ex:If paragraphP 1 contains sentences mentioning Node 1, Node 2, and Node 3
+(but not Node 4 or Node 5), thenN 1 ={1,2,3}
+–E probe (Paragraph-Level Candidate Pair Pruning):
+This is the list of all entity pairs that will eventually be checked with the LLM. It
+is constructed by iterating through all paragraphs. For each paragraphP p, all pairs
+of nodes(i, j)that both appear in that paragraph (i.e.,i∈N p andj∈N p) are
+identified and added to the global setE probe. Using a set automatically handles
+duplicates when a pair appears together in multiple paragraphs.
+Example:
+FromP 1 (containing nodes{1,2,3}), you add pairs(1,2),(1,3),(2,3)toE probe.
+FromP 2 (containing nodes{1,3,4,5}), you add pairs(1,3),(1,4),(1,5),(3,4),
+(3,5),(4,5)toE probe. (Note that(1,3)is already present, sets handle duplicates).
+The finalE probe for the document (so far) would be:
+Eprobe =
+
+
+
+(1,2),(1,3),(2,3),// FromP 1
+(1,4),(1,5),// FromP 2 (1,3 already exists)
+(3,4),(3,5),(4,5)// FromP 2
+
+
+
+Above candidate pairs = 8 (Much less thanN 2 =5 2 = 25).
+–G p:
+Group of Pairs for Paragraph p. This is the subset of candidate pairs fromE probe
+that were specifically generated because both nodes appeared together in paragraph
+Pp. This groupG p is used for batching the LLM calls — the text of paragraphP p
+and the list of pairsG p are sent to the LLM in a single query.
+Ex:
+G1 = [(1,2),(1,3),(2,3)]
+(The pairs generated from paragraphP 1. These pairs are sent along with the text
+ofP 1 to the LLM.)
+G2 = [(3,4),(3,5),(4,5)]
+(The pairs generated from paragraphP 2. These pairs are sent along with the text
+ofP 2 to the LLM.)
+10
+DLF
+3.3 On-the-fly Mediator-Controlled Causal Prior Generation (C prior) Generation
+Our goal here is to create the sparse ”answer key”C prior by efficiently and intelligently querying the teacher
+LLM.
+OurC prior is kinda a high-quality ”training dataset” that tlls us the true causal links in the document.
+Since we have no human labels, we must generate the dataset ourselves. This is a self-supervised process.
+The core idea is to use a large, powerful ”Teacher” LLM (e.g., GPT-4o) to perform complex causal reasoning.
+The output of this phase is theC prior (Causal Prior).
+Cprior
+TheC prior is a sparse training dataset of direct causal effect scores.
+•Form:It is a list of tuples(i, j,score), whereiis asubjectnodeid,jis anobjectnodeid, and
+score is a float∈[0.0,1.0].
+•Purpose:It serves as the supervisory signal (or “ground truth”) for theL causal (Causal Loss)
+function.
+•Meaning:A score of1.0means the “Teacher” LLM has determined there is a direct causal
+linki→j. A score of0.0means there is no direct link.
+•Process:Our CausGT-HS GNN (the “Student” model) is trained to replicate these scores.
+This process is known asKnowledge Distillation, where we distill the slow, complex, sym-
+bolic reasoning of the “Teacher” LLM into the fast, numerical, graph-based architecture of the
+“Student” GNN.
+3.3.1 Active Candidate-Set Expansion (ACE):
+The Core Problem:Now we have N nodes (for N entities) We cant ask the ”Teacher” LLM to evaluate
+allN×Npossible pairs of nodes. For a document with 50000 nodes, this is 2.5 billion queries, which is
+computationally and financially impossible.
+We introduceActive Candidate-Set Expansion (ACE), a multi-stage filtering cascade. The goal of
+ACE is to intelligently and efficiently prune theO(N 2)search space down to a small, high-quality, high-recall
+list of candidate pairs,E prior. This small list is what we actually send to the LLM for expensive causal
+reasoning. This process consists of 2 filtering stages:
+•Structural Filter
+•Semantic Filter
+1.Structural Filter (GAE):
+Goal:Here our goal is to find all structurally plausible candidate pairs, including non-obvious, multi-
+hop pairs that were missed by our initial (local-only) graph extraction.
+Initial Problem:Our initial graph matricesA W are ”myopic” (local). They only contain 1-hop links
+found within the same paragraph. We need an unsupervised way to find pairs(i, j)that are strongly
+connected via multi-hop paths (e.g.,i→k→l→j), as these are highly plausible candidates for
+causal relationship.
+11
+DLF
+Architecture:A GAE (Graph Autoencoder). GAE is an unsupervised GNN architecture ideal for
+this task. It consists of two components:
+(a)Encoder (f encoder):A GNN that compresses each node’s structural neighborhood into a low-
+dimensional embedding.
+(b)Decoder (f decoder):A function (dot product) that reconstructs the graph by predicting links
+between nodes based on the similarity of their embeddings.
+Justification for GAE training:The GAE is trained on apretext task: reconstructing the “dumb,”
+local, 1-hop graphA co-occur. We do this not because we want to reconstructA co-occur, but because in
+order to succeed at this task, the Encoder (f enc) is forced to learn a “smart” latent embedding space
+(Z).
+In this space, nodes that are structurally related via multi-hop paths (e.g.,i→k→j) are placed close
+together. We then exploit this embedding spaceZto find the multi-hop links thatA co-occur was missing.
+Justification for 2-Layer GCN:We use a 2-layer GCN as our encoderf enc. This is a deliberate
+hyperparameter choice to balance two opposing problems:
+•Myopia (1 layer):A 1-layer GCN is “short-sighted.” Its embeddingZ i only contains information
+from its 1-hop neighbors. It cannot discover the 2-hop pathi→k→j.
+•Over-Smoothing (L layers, e.g.,L= 10):After many layers of message-passing, the em-
+beddings of all nodes in a connected graph converge to the same value, “forgetting” all local
+structure.
+•Sweet Spot (2–3 layers):A 2-layer (or 3-layer) GCN is the “sweet spot” — deep enough to
+capture crucial 2-hop and 3-hop paths, yet shallow enough to avoid over-smoothing.
+Detailed overview:
+•Input:
+Aco-occur ∈ {0,1}N×N
+–Its a sparse, unweighted, symmetric ”scaffolding” graph. It is the binary union of all K initial
+weighted matrices:
+Aco-occur(i, j) = 1if∃ksuch thatW k(i, j)>0
+–Dimensions:N×N(N = total nodes/entities)
+–Property: Its extremely sparse. Stored in a format like COO or CSR (i’ll decide later (it
+happens to store onlyO(|E|)memory (i.e., no. of edges))) (Allows fast row access, matrix-
+vector multiplication, and message passing operations — critical in GNNs and GTNs.). So
+above|E|are the number of non-zero entries (edge)|E| ≪N 2.
+X∈R N×din :
+–Initial node features (pretrained embeddings of node names)
+–Dimensions:N×d in (din are our initial embeddings).
+12
+DLF
+•GAE Encoder (f encoder):
+Layer 1:
+H(1) =ReLU
+
+ˆD−1/2 ˆA ˆD−1/2XW0
+
+W0 ∈R din×dh :
+Learnable weight matrix (e.g., [384×128]).d h is the hidden dimension.
+ˆA=A co-occur +I:
+Adjacency matrix with self-loops (sparse).
+ˆD:
+Diagonal degree matrix of ˆA.
+ˆD−1/2 ˆA ˆD−1/2 :
+Symmetrically normalized adjacency matrix.
+Efficiency:The operation ˆA·Xis not a denseO(N 2)multiplication. It is a Sparse Matrix-
+Matrix Multiplication (SpMM) with complexity
+O(|E| ·din),
+which scales linearly withN(assuming|E|scales linearly withN).
+H(1) ∈R N×dh :
+Matrix of 1-hop-aware node embeddings (e.g., [50,000×128]).
+—
+Layer 2 (Encoder Output):
+Z= ˆD−1/2 ˆA ˆD−1/2H(1)W1
+W1 ∈R dh×dz :
+Learnable weight matrix (e.g., [128×64]).d z is the final latent dimension.
+Efficiency:This is also a sparse SpMM operation with complexity
+O(|E| ·dh).
+Z∈R N×dz :
+The final latent embedding matrix (e.g., [50,000×64]). The vectorZ i now encodes structural
+information about nodei’s 2-hop neighborhood.
+13
+DLF
+•GAE Decoder (f decoder):
+Equation:
+ˆA=S GAE =σ(ZZ ⊤)
+ZZ ⊤ ∈R N×N :
+This is the conceptualN×Nmatrix of predicted link probabilities. We donotcompute this
+dense matrix explicitly, as it would require anO(N 2dz)operation.
+•Training (Loss function):
+Training Objective:We train the parametersW 0 andW 1 using a sampled binary cross-entropy
+loss. The loss is computed only on thepositivelinks (fromA co-occur) and a random sample of
+negativelinks.
+L=−
+X
+(i,j)∈P
+log
+ 
+σ(ZiZ⊤
+j )
+
+−
+X
+(i,k)∈N
+log
+ 
+1−σ(Z iZ⊤
+k )
+
+The above equation is Binary cross entropy specialised for GAE. It measures how well the model
+reconstructs the observed links (positive samples) while penalizing incorrect predictions on non-
+existent links (negative samples).
+–P: The set of positive links, whereA co-occur(i, j) = 1.|P|=|E|.
+–N: A random sample of negative links, whereA co-occur(i, k) = 0. We set|N|=|P|.
+– Efficiency:The dot productsZ iZ⊤
+j are computedon-the-flyonly for these2· |E|pairs.
+The total training complexity isO(|E| ·d z), which is linear and highly scalable.
+Dual-Stream Causal-Transformer
+Relation between ˆAandS GAE:The matrices ˆAandS GAE aremathematically identical:
+SGAE ≡ ˆA=σ(ZZ ⊤)
+Their distinction lies only in context:
+– During GAE Training:Referred to as ˆA(thepredicted adjacency matrix). Purpose:
+Compared with the true graphA co-occur to compute the loss
+L=BCE( ˆA, Aco-occur)
+– After Training:Referred to asS GAE (thethe structural plausibility score matrix).
+Purpose: Used to select the Top candidate set-1 most plausible new links
+In summary, ˆAis used fortraining, whileS GAE is used forinference.
+14
+DLF
+•Output (Candidate Set 1):Now we need to find the best candidate pairs(i, j)to check for
+causal link. Based on above this would beN 2, this was technically represented in ofS GAE matrix.
+We cannot compute or store this matrix (like think ifN >100000).
+Hence its better to analyze only over the most important pairs from this logical matrix without
+actually computing the whole thing.
+Hence we useApproximate Nearest Neighbors (ANN)on the latent embedding space Z.
+A pair(i, j)will only have a high score inS GAE if their embeddings (Z i andZ j) are very close
+in the 64-dimensional latent space.
+So the problem changes from instead of ”find the top-Kpairs in anN×Nmatrix” the problem
+becomes: for each node i, find its Top-k
+′
+closest neighbours in the N-node embedding space.
+(a) We first build an ANN index (FAISS to be specific) on the N vectors in Z.
+Complexity =O(Nd zlogN)
+(b) For each nodei∈N, query the index for its Top-k
+′
+nearest neighbours in the latent space.
+(Note:k
+′
+is a ”small” hyperparam (maybe 50 idk)).
+Neighboursi =ANNIndex.search(Z i, k′)
+(c) Candidate Set 1 is the union of all these pairs:
+C1 =
+[
+i∈N
+{(i, j)|j∈Neighbors i}
+Our candidate Set 1C 1 is now our final list ofK 1 pairs that are structurally plausible (i.e.,
+”close” in the 2-hop embedding space).
+Our Brute force approach wasO(N 2)and our ANN approach is nowO(N.k
+′
+)(linear).
+LetK 1 be size of our resulting set,K=|C 1|. Its maximum size as inferred above isN.k
+′
+. Linear.
+2.Semantic Filter (RAG-based with RAV verification):
+Goal:Here our basic goal is to filter the largeK 1 ”structurally plausible” set down to a small,K 2
+”semantically plausible”set. This pipeline is designed for maximum accuracy, speed, and robustness
+against hallucinations.
+Initial Problem:Our GAE (in previous step) is ”semantically blind” and will find structurally plausible
+but nonsensical pairs.
+Example: Consider a knowledge graph where nodes represent entities and events:
+Company A’s Stock,News Article X,Company B’s Stock,Government Policy.
+Edges denote co-mentions in news reports. The Graph Autoencoder (GAE) observes the 2-hop path
+(Company A’s Stock)→(News Article X)→(Company B’s Stock)
+and predicts a high reconstruction score for the edge(Company A’s Stock,Company B’s Stock). Al-
+though this connection is structurally plausible, it is semantically nonsense. the two companies merely
+co-occur in the same article and may not be semantically or causally related. Hence, the GAE is said
+to besemantically blind—it captures structural proximity but ignores causal or semantic meaning.
+15
+DLF
+Solution:We combine RAG-HyDE (Hypothetical Document Embeddings) for high-quality retrieval
+with RAV (Retrieval-Augmented Verification) to ground the LLM’s generations and prevent hallucina-
+tions.
+Architecture:Here we use a LLM for 3 roles:
+•A Hypothetical generator (f hypothetical): Generates hypothetical answer snippets.
+•A verifier (f verifier ): Verifies it own generations against retrieved facts.
+Detailed Overview:
+•S= [s 1, . . . , sM ]:This is the list of all M sentences from our document.
+fembed:A pre-trained sentence embedding model (e.g.,all-MiniLM-L6-v2, with embedding
+dimensiond embed = 384).
+VD ∈R M×dembed :TheDocument Vector Store— a dense matrix where each row corresponds
+to a sentence embedding:
+VD(m) =f embed(sm)
+idx_doc:An Approximate Nearest Neighbor (ANN) index (e.g., FAISS) built onV D for efficient
+k-NN search.
+•Filtering:
+We do this below for every(i, j)in the Candidate set 1.
+(a)Hypothetical Document Generation (f hypothetical): We query the LLM with the following
+instruction to synthesize plausible hypotheses about the possible causal connection between
+nodes:
+prompt="Generatek hypothetical short, hypothetical sentences describing a plausible relationship between ’nodeiname’ and ’nodejname.’"
+This produces a set ofk hypothetical generated hypotheses:
+H= [h 1, h2, . . . , hkhypothetical ]
+Each hypothesis is embedded to produce dense representations:
+[vk1 , vk2 , . . . , vkhypothetical ]
+To mitigate the risk ofhallucination drift—wherein LLMs produce semantically coherent
+yet unsupported statements—we verify the generated hypotheses through retrieval-based
+grounding and semantic consistency estimation.
+Hypothesis Verification via RAG + Semantic Entropy Filtering:
+Given the set of hypothetical claimsH= [h 1, h2, . . . , hkhypothetical ], the goal is to identify a
+grounded subsetH verified that is both factually supported by document evidence and seman-
+tically consistent under model uncertainty.
+Step 1: Initialization.Initialize an empty list to store verified hypotheses:
+Hverified ←[ ]
+16
+DLF
+Step 2: Evidence Retrieval via RAG.For eachh l ∈H, retrieve top-k RAG supporting
+document snippets using the embedding-based retriever:
+⃗ vhl ←f embed(hl)
+IndicesV ←ANN_Search(index=idx_doc,query=⃗ v hl, kRAG = 3)
+verification_snippets←Join
+ 
+{S[idx]|idx∈Indices V }
+
+These snippets act as the local context to check factual support for the hypothesis.
+Step 3: LLM Self-Check Verification.Each hypothesish l is paired with its retrieved
+evidence and passed to the LLM verifierf verify:
+promptVerify = ”Claim: ′
+hl’. Evidence: ’verificationsnippets’. Does the Evidence strongly support the Claim? YES or
+NO.”
+The verifier’s response is converted into a probabilistic confidence score:
+psupport(hl) =f verify(promptVerify)∈[0,1]
+This score measures the factual alignment between the claim and the retrieved evidence.
+Step 4: Semantic Entropy Estimation (H semantic).To capture epistemic uncertainty in
+the verifier’s reasoning, we perform multiple stochastic forward passes with different random
+seeds or temperature-scaled sampling:
+P(Y|X, θ T ) =f verify(X;T)
+AcrossRindependent samples, letp r represent the normalized probability assigned to each
+semantic outcome (e.g., “YES,” “NO,” or paraphrastic variants). Semantic entropy is defined
+as:
+Hsemantic(hl) =−
+RX
+r=1
+pr logp r
+A lowH semantic indicates internal consistency and strong model confidence, whereas high
+Hsemantic signifies semantic disagreement or possible hallucination.
+Step 4.1: Temperature–Entropy Relationship.The temperature parameterTin LLM
+decoding directly affects the entropy of generated responses:
+P(yi |x) = exp
+ zi
+T
+
+P
+j exp
+ zj
+T
+
+wherez i denotes the unnormalized logit for tokeni. A lower temperature (T→0) sharp-
+ens the output distribution, leading to deterministic but potentially overconfident responses
+and thus reducingH semantic. Conversely, a higher temperature increases stochasticity and
+entropy, amplifying semantic variation and potential disagreement.
+Empirical studies suggest that amoderate temperature(T∈[0.6,0.8]) provides the best
+calibration—balancing semantic diversity with factual stability. This ensures thatH semantic
+reflects genuine model uncertainty rather than random sampling noise.
+17
+DLF
+Step 5: Dual Filtering (Evidence + Entropy).A hypothesis is retained only if both
+factual support and semantic stability conditions are satisfied:
+psupport(hl)> τsupport andH semantic(hl)< τentropy
+If satisfied:H verified ←H verified ∪ {hl}
+Step 6: Output.Return the final grounded and semantically consistent set of hypotheses:
+returnH verified
+This verification pipeline ensures thatH verified represents only those hypothetical causal state-
+ments that are (a) factually supported by the retrieved corpus and (b) semantically stable
+under model uncertainty. By integratingH semantic as an intrinsic uncertainty estimator, the
+framework minimizes hallucination risk and promotes robust, evidence-aligned causal reason-
+ing.
+(b)Adaptive Pooling and Multi-query Rank Fusion (RAG-MMR):
+Key Definitions and Parameters
+–k pool — Adaptive candidate pool size, dynamically determined by verification
+confidence:
+kpool =k base + (1−score)·k expansion
+where score is derived from semantic entropy or verification consistency.
+–k RAG — Final number of top snippets chosen after MMR reranking.
+–λ— Controls the trade-off between relevance and diversity in MMR.
+–κ— Constant in RRF that smooths reciprocal rank influence.
+i.Adaptive Candidate Pooling:For each verified hypothesish∈H verified with a confi-
+dence score, dynamically set the pool size:
+kpool(h) =k base + (1−score h)·k expansion
+Higher uncertainty (lower score or higher entropy) results in larger pools, allowing the
+retrieval system to explore broader context.
+ii.MMR Reranking (Balancing Relevance and Diversity):Retrievek pool nearest can-
+didates using approximate nearest neighbor (ANN) search:
+Indicesh,pool =ANNSearch(index=idx_doc,query=⃗ v h, k=kpool(h))
+Then apply the Maximal Marginal Relevance (MMR) criterion:
+MMRScore(d) =λ·sim(⃗ vh,⃗ vd)−(1−λ)·max
+j∈Selected
+sim(⃗ vd,⃗ vj)
+Select the topk RAG items as the diverse final list for each hypothesis.
+iii.Rank Fusion (Reciprocal Rank Fusion — RRF):After MMR, each hypothesish
+yields a short ranked list of its most relevant snippets. We now combine these lists using
+RRF, a simple yet robust fusion technique that rewards consistency across hypotheses.
+RRFScore(d) =
+X
+h∈Hverified
+1
+κ+rank h(d)
+18
+DLF
+–rank h(d)— Rank position of documentdin hypothesish’s list (1 for top item, 2 for
+next, etc.).
+–Ifddoes not appear in listh, it is either ignored or assigned a large rank value.
+–κ(typically 60–100) dampens small-rank dominance and prevents a single top item
+from overwhelming the score.
+Intuition:Snippets that appear consistently near the top across multiple hypotheses
+accumulate higher scores, producing a consensus-driven ranked list that is both relevant
+and stable across query variations.
+iv.Final Fusion and Deduplication:Combine all hypothesis-specific lists into one unified
+set:
+Indicestotal =
+[
+h∈Hverified
+FinalIndicesh
+Sort by RRFScore(d)and select the top entries for downstream RAG context.
+Where Semantic Entropy Exactly Plugs In:
+–The verification score score h can be derived from semantic entropy inversion, or equiva-
+lently:
+scoreh =p support ×(1−normalized variance)
+–It controls the adaptivity of the retrieval system:
+∗Lower confidence (high entropy):increasek pool, raise MMR diversity by reducing
+λ, or increase sampling temperature.
+∗Higher confidence (low entropy):shrinkk pool, tightenλtoward 1 for more focused
+retrieval.
+Pseudocode:
+# Adaptive Pooling and Multi-query Rank Fusion (RAG-MMR)
+# Step 1: Adaptive Candidate Pooling
+all_ranked_lists = []
+for (h, score) in H_verified_scores.items():
+# Dynamically adjust pool size based on confidence
+k_pool = int(k_base + (1 - score) * k_expansion)
+# Retrieve top-k_pool candidates via ANN search
+pool_indices, pool_vectors = ANN_Search(idx_doc, v_h, k=k_pool)
+# Step 2: MMR Reranking (Relevance{Diversity balance)
+final_list_h = MMR_rerank(
+query_vec=v_h,
+candidates=pool_vectors,
+k=k_RAG,
+lambda_value=lambda_mmr
+)
+all_ranked_lists.append(final_list_h)
+# Step 3: Rank Fusion (Reciprocal Rank Fusion | RRF)
+RRF = dict()
+for list_h in all_ranked_lists:
+for rank, doc in enumerate(list_h, start=1):
+RRF[doc] = RRF.get(doc, 0.0) + 1.0 / (kappa + rank)
+19
+DLF
+# Step 4: Final Context Selection
+final_sorted = sort_by_value_desc(RRF)
+Indices_total = final_sorted[:k_FINAL]
+# Output: Adaptively pooled, diverse, and consensus-fused context snippets
+Complexity and Efficiency Notes:
+–Over-fetching large pools for many hypotheses is computationally heavy; adaptive pooling
+helps but worst-case cost scales with total hypotheses.
+–Cache results — similar hypotheses often retrieve overlapping candidates.
+–Early de-duplication (by document ID) reduces downstream RRF computation.
+–Apply a global retrieval budget to prevent explosion in total retrieved snippets.
+Pitfalls and Practical Considerations:
+– Over-expansion:Very low verification scores may inflatek pool excessively — cap it at
+a maximum threshold.
+– Noisy verification scores:Entropy-based scores can fluctuate; use exponential moving
+averages for stability.
+– MMR tuning:Too smallλyields irrelevant “diverse” snippets; too largeλkills diversity.
+– RRFκsensitivity:κtoo small→rank-1 items dominate.κtoo large→all contribu-
+tions flatten, weakening discrimination.
+Result:A final ranked set of snippets that are adaptively pooled, semantically diverse,
+confidence-weighted, and consensus-fused — forming the optimal retrieval substrate for
+downstream RAG generation.
+20
+DLF
+MMR (Maximal Marginal Relevance)
+Problem:Retrieved passages in RAG are often redundant, repeating similar informa-
+tion.
+Idea:MMR balancesrelevanceto the query withdiversityamong selected passages.
+Formula:
+MMR= arg max
+di∈D\S
+h
+λ·Sim(d i, q)−(1−λ)·max
+dj∈S
+Sim(di, dj)
+i
+Where:
+–D: set of all retrieved documents/snippets
+–S: set of already-selected documents
+–d i: candidate document not yet selected
+–q: query embedding
+–Sim(a, b): cosine similarity betweenaandb
+–λ: trade-off parameter (0≤λ≤1) — higher values favor relevance, lower
+values favor diversity
+Interpretation:Select each new passage that is highly relevant to the query but
+minimally similar to what’s already chosen, ensuring diverse and informative retrieval.
+Outcome:Produces a complementary, non-redundant set of retrieved passages for
+richer RAG context.
+(c)Build Dynamic Context and Run Causal Plausibility Classifier (CPC):
+i.Executive summary.This section describes the offline workflow to construct a high-
+quality, multi-label dataset and to train a fast, deployable Causal Plausibility Classifier
+(CPC). The workflow has two major parts: (A)Dataset construction (for CPC) and
+Teacher LLM labelingand (B)Model training and calibration. The CPC is designed
+as a discriminative cross-encoder (DeBERTa-v3 base) with three task-specific heads
+(Plausible, Temporal, Mechanistic). The trained CPC is followed by post-hoc calibration
+so outputs become reliable probabilities used for downstream filtering rules.
+Note:We are not yet doing the unidirectional causal check. This step is intentionally bidirectional.
+The CPC model’s input"[CLS]{context}[SEP]{nodei}[SEP]{nodej}[SEP]"will produce
+the same logits as"[CLS]{context}[SEP]{nodej}[SEP]{nodei}".
+In this Active Candidate Expansion (ACE) phase, the ultimate goal isplausibility, not directionality.
+It only reduces, say, 1M pairs to 10K pairs — like asking, “Areiandjrelated in a way worth checking
+for causality?”
+The unidirectional check (i→jvs.j→i) is the work of the next phase:Mediator-Controlled
+Counterfactual Querying (MCC-LME).
+21
+DLF
+Part A: Dataset construction (for CPC) and Teacher LLM labeling
+A.1 Motivation and high-level design
+The goal of Part A is to produce a large, balanced, and robust multi-label dataset of tuples
+(nodei,node j,highqualitycontext)
+together with multi-task labels and a short rationale per example. This dataset will be used
+to train the CPC cross-encoder. High-quality contexts are retrieved with a full retrieval
+pipeline (RAG-HyDE-RAV) and structural plausibility candidates are proposed by a Graph
+Auto-Encoder (GAE) + ANN index.
+A.2 Key label definitions (report-style explanation)
+Below we define the three label axes used by the CPC. These appear as independent binary
+targets and are the core of the multi-task design.
+Plausibility (Adjective: Plausible). Formal definition:Plausibility measures the logical
+and semantic coherence of a potential relationship between two nodes in the given context.
+It answers: “Is it possible and sensible that a connection exists between these two concepts,
+given the context?”
+In simple terms:“Does this link make sense at all, or is it nonsense?” This is the primary
+keep/discard filter.
+Examples:
+–Plausible:(“XGBoost”, “accuracy”) — an algorithm vs. a performance metric; the
+relation is sensible.
+–Implausible:(“XGBoost”, “18th Century France”) — normally implausible unless the
+context is extremely specific.
+Temporality (Adjective: Temporal). Formal definition:Temporality measures whether
+the text provides evidence of a time-based order between the two nodes. True causality re-
+quires cause preceding effect.
+In simple terms:“Is there a time-order? Does the text say one thing led to or followed
+another?”
+Examples:
+–Context: “The implementation of XGBoost (Nodei) led to a 95% accuracy (Nodej).”
+Label:labeltemporal = YES(phrase “led to” indicates order).
+–Context: “We discuss XGBoost (Nodei) and accuracy (Nodej).”
+Label:labeltemporal = NO(no order implied).
+Mechanism (Adjective: Mechanistic). Formal definition:Mechanism measures whether
+the text describes a process, pathway, or means by which one node influences the other (the
+“how”).
+In simple terms:“Does the text explain howiaffectsjor through what means?”
+Examples:
+–Context: “XGBoost (Nodei) achieves high performance (Nodej) by using gradient
+boosting principles.”
+Label:labelmechanistic = YES.
+22
+DLF
+–Context: “XGBoost (Nodei) achieved high performance (Nodej).”
+Label:labelmechanistic = NO(no explanation of the mechanism).
+A.3 Step 1 — Generate weak labels (unlabeled dataset)
+Objective:Build a massive pool of tuples (nodei, nodej, context) from a diverse corpus
+(e.g., 10k PDFs) that will be annotated by a Teacher LLM.
+Procedure:
+i.Corpus collection:Collect heterogeneous documents across domains (scientific articles,
+technical docs, web corpora), target scale: tens of thousands of files.
+ii.Run ACE Stage 1 (GAE pass):For each document, extract node listsNand initial
+scaffolding adjacencyA co-occur. Train or apply the Graph Auto-Encoder (GAE) and build
+an ANN index over learned structural embeddings.
+iii.Candidate generation:Use the ANN index to propose millions of structurally plausible
+(i, j) candidate pairs, prioritizing structural plausibility while ensuring semantic coverage.
+iv.Context retrieval (RAG-HyDE-RAV):For each candidate pair, run the full retrieval
++ HyDE reranking pipeline to fetch the highest-quality supporting context string.
+v.Output:Produce a large unlabeled file of tuples:
+(nodeiname,nodejname,highqualitycontextstring). Example scale:O(10 7)tuples.
+A.4 Step 2 — Teacher LLM labeling and rationale augmentation
+Objective:Use a high-capability Teacher LLM to annotate each tuple with a one-sentence
+rationale and three binary labels (plausible, temporal, mechanistic).
+Prompt and output schema:Provide the Teacher LLM with the retrieved context and
+pair, and request a structured JSON like:
+{"rationale": "...", "label_plausible": "YES"|"NO",
+"label_temporal": "YES"|"NO", "label_mechanistic": "YES"|"NO"}
+Quality controls:
+–Enforce instruction-following: single-sentence rationale, exactly the JSON schema, con-
+servative labeling guidelines.
+–Sample-based human validation: periodically validate Teacher outputs to ensure accuracy
+and reduce systematic bias.
+Offline output:labeleddata.jsonl— each line is a JSON object containing the con-
+text, the pair, the rationale, and the three labels.
+A.5 Examplelabeleddata.jsonl(three samples)
+The following verbatim entries are representative lines from thelabeleddata.jsonlfile:
+23
+DLF
+Example Causal-Plausibility Data Points
+Datapoint 1
+{
+"context": "We evaluated XGBoost on the ImageNet dataset (IMG). The
+performance achieved...",,→
+"pair": ["performance", "accuracy"],
+"rationale": "The context states that 'performance' (the subject) 'achieved'
+the 'accuracy'...",,→
+"label_plausible": "YES",
+"label_temporal": "YES",
+"label_mechanistic": "NO"
+}
+Datapoint 2
+{
+"context": "The XGBoost model (XGB) utilizes gradient boosting (GB)
+principles.",,→
+"pair": ["XGBoost", "gradient boosting"],
+"rationale": "The text explicitly states that XGBoost 'utilizes' gradient
+boosting...",,→
+"label_plausible": "YES",
+"label_temporal": "YES",
+"label_mechanistic": "YES"
+}
+Datapoint 3
+{
+"context": "Both XGBoost and LightGBM are popular GBDT frameworks...",
+"pair": ["XGBoost", "LightGBM"],
+"rationale": "The text only *compares* these two entities as peers...",
+"label_plausible": "NO",
+"label_temporal": "NO",
+"label_mechanistic": "NO"
+}
+A.6 Step 3 — Generate adversarial (hard) negatives
+Goal:Create hard negatives to prevent trivial shortcuts and to increase classifier robustness.
+Definition (Adversarial Hard Negative):A pair(i, k)that is semantically similar to a
+positive example but structurally distant fromiin the GAE embedding space. Example: for
+positive(XGBoost,accuracy), a hard negative might be(XGBoost,LightGBM)if LightGBM
+is semantically similar to XGBoost but not causally linked.
+Procedure:
+i. For each positive(i, j), find candidate nodeksuch that semanticsim(j, k)is high but
+structuralsimGAE(i, k)is low (e.g.,<0.1).
+ii. Retrieve context for(i, k)using RAG-HyDE.
+iii. Label the adversarial candidate with the Teacher LLM; expectlabelplausible = NO
+in most cases.
+24
+DLF
+iv. Construct a final balanced training dataset by sampling:
+–50% Positive examples (Teacher saysYES),
+–25% Easy negatives (random TeacherNO),
+–25% Hard negatives (adversarial, Teacher-labeled).
+Offline output:traindataset.jsonl(e.g., 1M examples, balanced as above).
+Part B: Model training, calibration and final deliverables
+B.1 Step 4 — Train the Causal Plausibility Classifier (CPC)
+Architecture overview (Discriminative Cross-Encoder).
+– Encoder body:DeBERTa-v3 (or similar transformer).
+– Input format:
+[CLS]contextstring[SEP]nodeiname[SEP]nodejname[SEP]
+– Shared representation:The encoder produces a pooled token embeddingH CLS rep-
+resenting the entire input.
+– Three independent heads:Each head is a linear classifier producing a scalar logit:
+logitplausible =W plausible ·H CLS +b plausible,
+logittemporal =W temporal ·H CLS +b temporal,
+logitmechanistic =W mechanistic ·H CLS +b mechanistic.
+Multi-task loss and training.Each head is supervised with a binary cross-entropy loss;
+the total loss is the sum:
+Ltotal =L BCE
+ 
+logitplausible, yplausible
+
++LBCE
+ 
+logittemporal, ytemporal
+
++LBCE
+ 
+logitmechanistic, ymechanistic
+
+.
+Why multi-task?Joint training forces the shared encoder to learn representations sen-
+sitive to plausibility, temporal cues, and mechanism clues. This cross-task signal improves
+generalization and makes logit plausible more informative for downstream filtering.
+Training steps (practical notes):
+–Fine-tune with AdamW, learning-rate scheduler, mixed precision where available.
+–Use stratified shuffling respecting the Positive / EasyNeg / HardNeg ratios.
+–Hold out a 10% validation set for calibrator training (see B.2).
+–Save best checkpoint by validation loss and per-head AUROC.
+B.2 Step 5 — Train calibrators (Isotonic Regression)
+Goal:Convert CPC raw outputs (logits or raw probabilities) into well-calibrated probabili-
+ties that reflect real-world frequencies. This is essential because the CPC’s raw confidences
+are often miscalibrated (over- or under-confident).
+25
+DLF
+B.2.1 The problem: uncalibrated scoresModern neural classifiers produce logits or
+probabilities that do not reliably correspond to empirical accuracy. Example:p raw = 0.9does
+not necessarily mean “90% chance that the label is YES”. Without calibration, thresholding
+becomes unreliable.
+B.2.2 The solution: Isotonic RegressionIsotonic Regression is a non-parametric, order-
+preserving calibrator. It learns a monotonic mappingf(·)from raw scores to calibrated
+probabilities:
+pcalibrated =f(p raw), fmonotone non-decreasing.
+Advantages:
+–No parametric assumption (flexible).
+–Preserves ordering (if scoreA>scoreB then calibratedA≥calibratedB).
+B.2.3 The process:
+i.Hold-out set:Reserve 10% of the labeled training set as a hold-out (never used to
+update CPC).
+ii.Get raw outputs:Run the trained CPC on the hold-out inputs to obtain raw logits (or
+raw sigmoid probabilities) for each head:
+logitsplausibleholdout= [s 1, s2, . . . , sn].
+iii.Prepare labels:Extract the true binary labels,
+Yholdoutplausible = [y1, y2, . . . , yn].
+iv.Fit calibrator:For each head, fit an isotonic regression model:
+Calibratorplausible =IsotonicRegression().fit(logitsplausibleholdout, Yholdoutplausible).
+Repeat for temporal and mechanistic heads.
+v.Save:Serialize calibrator objects (e.g.,Calibrators.pkl).
+B.2.4 Intuition and examplesIsotonic regression constructs a stepwise mapping such as:
+–If CPC outputs raw scores in[0.7,0.8], the true empirical frequency may be0.75, so map
+that whole segment to0.75.
+–If CPC outputs raw scores in[0.9,1.0], empirical frequency may be0.92, so map accord-
+ingly.
+B.2.5 Using calibrators in the online inference pipelineAt inference time:
+i. Produce raw scores:
+logits=CPCModel(input)→(logit plausible,logit temporal,logit mechanistic).
+ii. Convert raw logits to raw probabilities (if logits were used):
+praw =σ(logit),or pass logits directly to calibrator depending on implementation.
+26
+DLF
+iii. Apply calibrators:
+pplausible =Calibrator plausible.predict(praw,plausible),
+and similarly for temporal and mechanistic heads.
+iv. Use these calibrated probabilities for decision rules:Threshold Selection:
+The thresholdsτ plausible,τ temporal, andτ mechanistic are tunablehyperparametersthat control
+the strictness of our filtering rule. They determine how confident the model must be
+before accepting a causal link as valid. Typical empirically chosen values are:τ plausible =
+0.5,τ temporal = 0.3, andτ mechanistic = 0.3.
+# Filtering Rule
+if p_plausible > tau_plausible and (
+p_temporal > tau_temporal or
+p_mechanistic > tau_mechanistic
+):
+# Keep example: add (i, j) to E_prior
+keep_example(i, j)
+else:
+# Discard example
+discard(i, j)
+B.3 Final deliverables and runtime assets
+After training and calibration we produce the following offline assets that are deployed with
+the live pipeline:
+–CPCModel.bin— the trained DeBERTa-v3 cross-encoder checkpoint (weights config).
+–Calibrators.pkl— serialized isotonic regression calibrators for plausible, temporal,
+and mechanistic heads.
+–traindataset.jsonl— final balanced training dataset used to train the CPC.
+–validationholdout.jsonl— hold-out data used for calibrator training and final eval-
+uation.
+–trainingreport.pdf— metrics (per-head AUROC, calibration curves, reliability dia-
+grams, confusion matrices).
+B.4 Some checks for later on here
+– Sanity checks:Verify that calibrator monotonicity holds and that reliability diagrams
+improve after calibration.
+– Human-in-the-loop:Spot-check Teacher LLM labels, especially for adversarial nega-
+tives.
+– Edge cases:Explicitly test on rare domains to ensure the CPC is not overly biased
+toward common contexts.
+– Monitoring:In production, log calibrated probabilities and flagged examples for periodic
+manual review and dataset refresh.
+Important equations and macros
+–Multi-task BCE loss:
+Ltotal =
+X
+t∈{plausible, temporal, mechanistic}
+LBCE
+ 
+logitt, yt
+
+.
+27
+DLF
+–Calibrator training:
+Calibratort =IsotonicRegression().fit
+ 
+scorest,holdout,labels t,holdout
+
+.
+The output”:
+Its a finalK 2-sized listE prior, which is now of extremely high quality and ready for the
+”Teacher” CoCaD (Counterfactual Causal-DP) causal reasoning.
+3.3.2 CoCaD (Counterfactual Causal-DP)
+Here our goal is to pick theseE prior list tuples and create ourC prior (Which happens to be a sparse list of
+direct causal links(i, j, score)which serves as the answer key for training our main CausGT-HS GNN model).
+Actually a fundamental goal of automated knowledge discovery from unstructured text is to move beyond
+simple correlational graphs (i−j) to the extraction of directed, causal mechanisms(i→j). This is the
+difference between an ”information map” and an ”explanation map”. However, extracting causal graphs
+from static, observational text happens to be notoriously difficult, ill-posed, as it is plagued by two primary
+forms of statistical error:
+1.Confounding (Spurious Correlation):Two variables, i and j, may appear strongly correlated because
+they both are influenced by a third, often unobserved, common cause k (called a confounder).
+Example: Ice Cream Sales (node i) and Crime Rates (node j) are strongly correlated, but neither causes
+the other; both are caused by Hot Weather (node k). A naive model will incorrectly learn the link
+i→j(Hence making it look as if Ice cream sales caused the rise in crime rates).
+2.Mediation (Indirect Causation):A variable i may have no direct causal effect on j, but may be
+linked by a chain of true causes (e.g.,i→k→j). A naive model, observing a strong correlation
+between i and j, may incorrectly add a ”false shortcut” linki→j, which masks the true, explanatory
+mechanism.
+Below we propose CoCaD (counterfactual Causal-DP), a novel self-supervised pipeline. CoCaD is specif-
+ically designed to solve both the confounding and mediation problems by systematically generating and
+pruning a set of causal hypotheses.
+We perform this in 2 steps:
+•CoCaD core:The core engine for reasoning. Its a non-recursive, DP-based pipeline that robustly
+calculates direct and indirect causal scores.
+•EM-Refinement:An unsupervised loop to refine the model’s parameters.
+1.CoCaD:Here our goal is to pick theseE prior list tuples and create ourC prior (Which happens to be
+a sparse list of direct causal links(i, j, score)which serves as the answer key for training our main
+CausGT-HS GNN model).
+We do the above in 3 steps:
+(a)BuildW direct (A direct guess map): Here our goal is to generate a single, robust, and cali-
+brated score,W direct(i, j), for the direct causal strength of every pair(i, j)inE prior. This score
+28

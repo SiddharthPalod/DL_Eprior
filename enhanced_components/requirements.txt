@@ -1,0 +1,12 @@
+# Additional requirements for enhanced components
+# Base requirements from parent directory are also needed
+
+# For CPC model training
+transformers>=4.30.0
+scikit-learn>=1.3.0
+
+# Already in base requirements:
+# google-generativeai>=0.8.3
+# torch>=2.0.0
+# numpy>=1.26.0
+
