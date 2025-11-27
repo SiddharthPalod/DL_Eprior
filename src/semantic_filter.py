@@ -12,6 +12,20 @@ from .node_extractor import NodeRecord
 from .structural_filter import CandidatePair
 from .vector_store import SentenceVectorStore
 
+# Import RAG-HyDE from enhanced_components
+try:
+    import sys
+    from pathlib import Path
+    enhanced_path = Path(__file__).parent.parent / "enhanced_components"
+    if enhanced_path.exists():
+        sys.path.insert(0, str(enhanced_path.parent))
+        from enhanced_components.rag_hyde import RAGHyDE
+        RAG_HYDE_AVAILABLE = True
+    else:
+        RAG_HYDE_AVAILABLE = False
+except ImportError:
+    RAG_HYDE_AVAILABLE = False
+
 
 @dataclass
 class SemanticCandidate:
@@ -40,8 +54,36 @@ class SemanticFilter:
         self.node_lookup = {node.node_id: node.label for node in nodes}
         self.llm_verifier = llm_verifier
         self.progress_callback = progress_callback
+        
+        # Initialize RAG-HyDE if available and enabled
+        self.rag_hyde: Optional[RAGHyDE] = None
+        if RAG_HYDE_AVAILABLE and config.use_rag_hyde:
+            try:
+                # Try to get API key from config or environment
+                api_key = config.gemini_api_key
+                if not api_key:
+                    import os
+                    api_key = os.getenv(config.gemini_api_key_env)
+                
+                if api_key:
+                    self.rag_hyde = RAGHyDE(
+                        api_key=api_key,
+                        model_name=config.gemini_model,
+                        temperature=config.rag_hyde_temperature,
+                        k_hypothetical=config.rag_hyde_k,
+                    )
+                    print("[semantic] RAG-HyDE initialized successfully")
+                else:
+                    print("[semantic] RAG-HyDE disabled: No API key available, falling back to templates")
+            except Exception as e:
+                print(f"[semantic] RAG-HyDE initialization failed: {e}, falling back to templates")
+                self.rag_hyde = None
 
-    def run(self, candidates: Sequence[CandidatePair]) -> List[SemanticCandidate]:
+    def run(
+        self,
+        candidates: Sequence[CandidatePair],
+        result_callback: Optional[Callable[[SemanticCandidate], None]] = None,
+    ) -> List[SemanticCandidate]:
         results: List[SemanticCandidate] = []
         total = len(candidates)
         if self.progress_callback is not None and total > 0:
@@ -56,6 +98,8 @@ class SemanticFilter:
                 pass
             else:
                 results.append(score)
+                if result_callback is not None:
+                    result_callback(score)
             if (
                 self.progress_callback is not None
                 and self.config.progress_every > 0
@@ -161,6 +205,19 @@ class SemanticFilter:
         return (value + 1.0) / 2.0
 
     def _generate_hypotheses(self, node_i: str, node_j: str) -> List[str]:
+        """Generate hypotheses using RAG-HyDE if available, otherwise use templates."""
+        # Try RAG-HyDE first if available
+        if self.rag_hyde is not None:
+            try:
+                hypotheses = self.rag_hyde.generate_hypotheses(node_i, node_j, k=self.config.rag_hyde_k)
+                # Extract text from Hypothesis objects
+                hypothesis_texts = [hyp.text for hyp in hypotheses]
+                if hypothesis_texts:
+                    return hypothesis_texts
+            except Exception as e:
+                print(f"[semantic] RAG-HyDE generation failed for ({node_i}/{node_j}): {e}, using templates")
+        
+        # Fallback to template-based hypotheses
         templates = [
             "{a} leads to {b}",
             "{a} affects {b}",

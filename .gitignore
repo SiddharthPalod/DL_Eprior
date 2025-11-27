@@ -1,0 +1,148 @@
+# ============================================
+# Python
+# ============================================
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+.Python
+*.egg-info/
+.installed.cfg
+*.egg
+MANIFEST
+
+# Virtual environments
+venv/
+env/
+ENV/
+env.bak/
+venv.bak/
+.venv/
+.venv
+
+# Build / Distribution
+build/
+develop-eggs/
+dist/
+downloads/
+eggs/
+.eggs/
+lib/
+lib64/
+parts/
+sdist/
+var/
+wheels/
+pip-wheel-metadata/
+share/python-wheels/
+
+# ============================================
+# PyTorch / Model files
+# ============================================
+*.pt
+*.pth
+*.pkl
+*.pickle
+*.h5
+*.hdf5
+*.ckpt
+*.safetensors
+
+# ============================================
+# Data files
+# ============================================
+# CSV files
+*.csv
+
+# Data directories
+pdf_embeddings/
+pdf_embeddings_old/
+
+# Archive files
+*.zip
+*.xlsx
+*.xls
+
+# ============================================
+# Environment files
+# ============================================
+.env
+.env.local
+.env.*.local
+env.txt
+*.env
+
+# ============================================
+# Output directories
+# ============================================
+outputs/
+outputs/**/*.json
+em_loop_outputs/
+*.log
+logs/
+
+# ============================================
+# IDE / Editor
+# ============================================
+.vscode/
+.idea/
+*.swp
+*.swo
+*~
+*.sublime-project
+*.sublime-workspace
+
+# ============================================
+# Jupyter Notebook
+# ============================================
+.ipynb_checkpoints
+*.ipynb
+
+# ============================================
+# OS files
+# ============================================
+.DS_Store
+.DS_Store?
+._*
+.Spotlight-V100
+.Trashes
+ehthumbs.db
+Thumbs.db
+desktop.ini
+
+# ============================================
+# Temporary files
+# ============================================
+*.tmp
+*.temp
+*.bak
+
+# ============================================
+# Testing / Coverage
+# ============================================
+.coverage
+.coverage.*
+htmlcov/
+.pytest_cache/
+.tox/
+.hypothesis/
+
+# ============================================
+# Type checking
+# ============================================
+.mypy_cache/
+.dmypy.json
+dmypy.json
+
+# ============================================
+# Profiling
+# ============================================
+.prof
+
+# ============================================
+# Project-specific
+# ============================================
+# Optional: Keep directory structure with .gitkeep files
+# Uncomment if you want to track empty output directories
+# !outputs/.gitkeep
+# !em_loop_outputs/.gitkeep

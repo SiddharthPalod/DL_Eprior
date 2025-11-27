@@ -55,6 +55,7 @@ class GeminiVerifier:
         base_url: str | None = None,
         base_url_env: str | None = None,
         timeout_seconds: float = 30.0,
+        max_api_calls: int | None = None,  # Maximum API calls before stopping
     ) -> None:
         env_name = api_key_env or "GEMINI_API_KEY"
         resolved_key = api_key or os.getenv(env_name)
@@ -75,6 +76,9 @@ class GeminiVerifier:
         self.model = genai.GenerativeModel(model_name)
         self.temperature = temperature
         self.timeout_seconds = timeout_seconds
+        self.max_api_calls = max_api_calls
+        self.api_call_count = 0
+        self.quota_exceeded = False
 
     def test_connection(self) -> bool:
         """Test if Gemini API is reachable and credentials are valid."""
@@ -97,9 +101,22 @@ class GeminiVerifier:
     def score(self, node_i: str, node_j: str, contexts: Sequence[str]) -> LLMScore | None:
         if not contexts:
             return None
+        
+        # Check if quota exceeded
+        if self.quota_exceeded:
+            print(f"[gemini] Quota exceeded, skipping API call for ({node_i[:30]}.../{node_j[:30]}...)")
+            return None
+        
+        # Check if max API calls reached
+        if self.max_api_calls is not None and self.api_call_count >= self.max_api_calls:
+            print(f"[gemini] Maximum API calls ({self.max_api_calls}) reached, stopping LLM calls")
+            self.quota_exceeded = True
+            return None
+        
         prompt = self._build_prompt(node_i, node_j, contexts)
         try:
             start_time = time.time()
+            self.api_call_count += 1
             response = _timeout_wrapper(
                 lambda: self.model.generate_content(
                     prompt,
@@ -111,7 +128,7 @@ class GeminiVerifier:
                 self.timeout_seconds,
             )
             elapsed = time.time() - start_time
-            print(f"[gemini] API call completed in {elapsed:.1f}s")
+            print(f"[gemini] API call {self.api_call_count} completed in {elapsed:.1f}s")
             payload = self._extract_text(response)
             data = json.loads(payload)
             return LLMScore(
@@ -124,7 +141,18 @@ class GeminiVerifier:
             print(f"[gemini] TIMEOUT for ({node_i[:30]}.../{node_j[:30]}...): {e}")
             return None
         except Exception as e:
-            print(f"[gemini] Score call failed for ({node_i[:30]}.../{node_j[:30]}...): {type(e).__name__}: {e}")
+            error_str = str(e).lower()
+            error_type = type(e).__name__
+            
+            # Check for quota/resource exhausted errors
+            quota_keywords = ["quota", "resource exhausted", "rate limit", "429", "exceeded", "limit"]
+            if any(keyword in error_str for keyword in quota_keywords) or "429" in error_str:
+                print(f"[gemini] QUOTA EXCEEDED: {error_type}: {e}")
+                print(f"[gemini] Stopping further API calls to prevent endless loop")
+                self.quota_exceeded = True
+                return None
+            
+            print(f"[gemini] Score call failed for ({node_i[:30]}.../{node_j[:30]}...): {error_type}: {e}")
             return None
 
     @staticmethod

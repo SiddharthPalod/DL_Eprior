@@ -44,12 +44,17 @@ class SemanticFilterConfig:
         "causes",
     ])
     use_llm: bool = False
+    use_rag_hyde: bool = False  # Disabled by default - use template-based hypotheses instead
+    rag_hyde_k: int = 4  # Number of hypotheses to generate
+    rag_hyde_temperature: float = 0.7  # Temperature for hypothesis generation
     gemini_model: str = "gemini-2.0-flash"
     gemini_temperature: float = 0.2
     gemini_api_key: str | None = None
     gemini_api_key_env: str = "API_KEY"
     gemini_base_url: str | None = None
     gemini_base_url_env: str | None = "BASE_URL"
+    max_api_calls: int | None = 200  # Maximum API calls before stopping (prevents quota issues)
+    stream_chunk_size: int = 500  # Candidates per streamed .jsonl chunk
     progress_every: int = 10
 
 

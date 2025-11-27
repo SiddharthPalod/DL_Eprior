@@ -83,6 +83,7 @@ class RAGHyDE:
         
         prompt = self._build_prompt(node_i, node_j, k)
         
+        # Check for quota/resource errors and fallback immediately
         try:
             start_time = time.time()
             response = self.model.generate_content(
@@ -125,7 +126,17 @@ class RAGHyDE:
             return hypotheses[:k]
             
         except Exception as e:
-            print(f"[rag-hyde] Error generating hypotheses: {type(e).__name__}: {e}")
+            error_str = str(e).lower()
+            error_type = type(e).__name__
+            
+            # Check for quota/resource exhausted errors
+            quota_keywords = ["quota", "resource exhausted", "rate limit", "429", "exceeded", "limit"]
+            if any(keyword in error_str for keyword in quota_keywords) or "429" in error_str:
+                print(f"[rag-hyde] QUOTA EXCEEDED: {error_type}: {e}")
+                print(f"[rag-hyde] Falling back to template-based hypotheses")
+            else:
+                print(f"[rag-hyde] Error generating hypotheses: {error_type}: {e}, using templates")
+            
             # Fallback to template-based hypotheses
             templates = [
                 f"{node_i} leads to {node_j}",

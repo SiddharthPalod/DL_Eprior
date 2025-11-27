@@ -1,0 +1,156 @@
+EM-Refinement Loop Testing Guide
+=================================
+
+This guide explains how to run the test files for the EM-Refinement Loop implementation.
+
+QUICK START
+-----------
+
+Run all tests from the project root:
+
+    python -m em_loop.test_models
+    python -m em_loop.test_losses
+    python -m em_loop.test_em_loop
+    python -m em_loop.test_integration
+
+Or validate basic functionality:
+
+    python -m em_loop.validate_implementation
+
+TEST FILES
+----------
+
+1. test_models.py
+   Tests model architectures:
+   - FusionModel forward pass and output range
+   - LPAModel forward pass and output range
+   - StudentSurrogate forward pass
+   - Teacher EMA update mechanism
+
+2. test_losses.py
+   Tests loss functions:
+   - Huber loss (quadratic and linear regions)
+   - Confidence-weighted BCE loss
+   - Consistency regularization loss
+   - Distillation loss (MSE)
+
+3. test_em_loop.py
+   Tests EM loop components:
+   - PseudoLabelDataset creation and sampling
+   - AnswerKey high-confidence filtering
+   - Jaccard similarity computation
+   - Single round of EM loop
+   - Multiple rounds of EM loop
+
+4. test_integration.py
+   Full integration tests:
+   - Complete EM-Refinement Loop with synthetic pipeline
+   - Checkpoint save/load functionality
+   - Training history tracking
+
+5. validate_implementation.py
+   Quick validation:
+   - Import all components
+   - Create configuration
+   - Instantiate models
+   - Test data structures
+
+RUNNING TESTS
+-------------
+
+Option 1: Run as modules (recommended)
+    python -m em_loop.test_models
+    python -m em_loop.test_losses
+    python -m em_loop.test_em_loop
+    python -m em_loop.test_integration
+
+Option 2: Run directly (from em_loop directory)
+    cd em_loop
+    python test_models.py
+    python test_losses.py
+    python test_em_loop.py
+    python test_integration.py
+
+Option 3: Use the test runner
+    python -m em_loop.run_tests
+
+EXPECTED OUTPUT
+---------------
+
+Each test file will print:
+- Test descriptions
+- ✓ marks for passed tests
+- Summary at the end
+
+Example output:
+
+    ============================================================
+    Testing EM-Refinement Loop Models
+    ============================================================
+
+    Testing FusionModel...
+      ✓ FusionModel output shape: (16,)
+      ✓ Output range: [0.123, 0.987]
+      ✓ FusionModel test passed!
+
+    ...
+
+    ============================================================
+    All model tests passed! ✓
+    ============================================================
+
+MOCK DATA
+---------
+
+The test files use synthetic/mock data to simulate:
+- Feature vectors (random normal distributions)
+- Pseudo-labels (scores, p-values)
+- Pipeline callbacks (mock CoCaD pipeline)
+
+This allows testing without requiring:
+- Real document corpus
+- Actual CoCaD pipeline integration
+- LLM API access
+
+INTEGRATION WITH REAL PIPELINE
+-------------------------------
+
+To integrate with the real CoCaD pipeline:
+
+1. Implement a pipeline_callback function that:
+   - Takes teacher models as arguments
+   - Runs the CoCaD pipeline (Steps 3.1-3.3)
+   - Returns an AnswerKey with pseudo-labels
+
+2. Use the callback when initializing EMRefinementLoop:
+
+    em_loop = EMRefinementLoop(config, pipeline_callback=your_callback)
+
+3. See example_usage.py for a template
+
+TROUBLESHOOTING
+---------------
+
+Import errors:
+    - Make sure you're running from project root
+    - Use "python -m em_loop.test_*" syntax
+    - Check that all dependencies are installed
+
+Device errors:
+    - Tests automatically use CPU or CUDA
+    - If CUDA is not available, CPU is used automatically
+
+Memory errors:
+    - Reduce batch_size in config for large datasets
+    - Reduce num_pairs in mock pipeline callbacks
+
+FILES CREATED
+-------------
+
+Tests may create:
+- em_loop_outputs/ directory (checkpoints, models)
+- Round-specific subdirectories
+- History JSON files
+
+These can be safely deleted after testing.
+

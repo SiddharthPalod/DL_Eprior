@@ -40,6 +40,20 @@ scores plus the RAG snippets (and optional Gemini rationale) that justified the 
 When `--use-llm` is on, the CLI prints `[pipeline] ...` stage markers and periodic
 `semantic filter progress X/Y processed` updates so you can track the Gemini calls.
 
+### Streaming semantic outputs
+
+During the semantic step every accepted pair is also written immediately to chunked
+JSONL files in `outputs/stream/` (e.g., `E_prior_part_001.jsonl`). These files are
+crash-safe (each line is standalone JSON), so even if the run stops early you still
+have the processed pairs. The chunk size defaults to 500 pairs but can be tuned with:
+
+```
+python -m src.pipeline --stream-chunk-size 200 ...
+```
+
+Use these chunked files directly for external tools or merge them later; the final
+`outputs/E_prior.json` is still emitted after the pipeline completes.
+
 ### Reusing precomputed artifacts
 
 If the graph + GAE prep steps take too long, cache the intermediate artifacts once and reuse them:

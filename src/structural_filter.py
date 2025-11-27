@@ -82,44 +82,105 @@ def train_structural_filter(
     adjacency: sp.coo_matrix,
     node_features: np.ndarray,
     config: StructuralFilterConfig,
+    output_dir: Path | None = None,
 ) -> np.ndarray:
+    from pathlib import Path
+    
     num_nodes, feature_dim = node_features.shape
     if num_nodes < 2:
         return node_features
 
-    adj_norm = _normalize_adjacency(adjacency)
-    model = GraphAutoEncoder(feature_dim, config.hidden_dim, config.latent_dim)
-    optimizer = torch.optim.Adam(model.parameters(), lr=config.learning_rate)
+    # Check if model exists and can be loaded
+    if output_dir is None:
+        output_dir = Path("outputs")
+    model_dir = output_dir / "models"
+    model_path = model_dir / "gae_model.pt"
+    
+    model = None
+    if model_path.exists():
+        try:
+            print(f"[structural] Found existing GAE model at {model_path}, attempting to load...")
+            checkpoint = torch.load(model_path, map_location='cpu')
+            
+            # Check if config matches
+            if (checkpoint.get('input_dim') == feature_dim and
+                checkpoint.get('hidden_dim') == config.hidden_dim and
+                checkpoint.get('latent_dim') == config.latent_dim):
+                
+                model = GraphAutoEncoder(feature_dim, config.hidden_dim, config.latent_dim)
+                model.load_state_dict(checkpoint['model_state_dict'])
+                print(f"[structural] Successfully loaded GAE model (trained for {checkpoint.get('epochs', 'unknown')} epochs)")
+            else:
+                print(f"[structural] Model config mismatch - will retrain. Saved: input={checkpoint.get('input_dim')}, hidden={checkpoint.get('hidden_dim')}, latent={checkpoint.get('latent_dim')}. Current: input={feature_dim}, hidden={config.hidden_dim}, latent={config.latent_dim}")
+        except Exception as e:
+            print(f"[structural] Failed to load model: {e}, will retrain")
 
-    x_tensor = torch.from_numpy(node_features.astype(np.float32))
+    # Train model if not loaded
+    if model is None:
+        adj_norm = _normalize_adjacency(adjacency)
+        model = GraphAutoEncoder(feature_dim, config.hidden_dim, config.latent_dim)
+        optimizer = torch.optim.Adam(model.parameters(), lr=config.learning_rate)
 
-    positives = _sample_edges(adjacency)
-    if not positives:
-        return node_features
-    pos_tensor = torch.tensor(positives, dtype=torch.long)
+        x_tensor = torch.from_numpy(node_features.astype(np.float32))
 
-    for _ in range(config.epochs):
-        model.train()
-        optimizer.zero_grad()
-        z = model(x_tensor, adj_norm)
+        positives = _sample_edges(adjacency)
+        if not positives:
+            return node_features
+        pos_tensor = torch.tensor(positives, dtype=torch.long)
 
-        neg_samples = _negative_samples(num_nodes, set(positives), len(positives))
-        if not neg_samples:
-            break
-        neg_tensor = torch.tensor(neg_samples, dtype=torch.long)
+        # Progress logging
+        log_interval = max(1, config.epochs // 20)  # Log every 5% of epochs
+        print(f"[structural] Training GAE for {config.epochs} epochs (logging every {log_interval} epochs)...")
+        
+        for epoch in range(config.epochs):
+            model.train()
+            optimizer.zero_grad()
+            z = model(x_tensor, adj_norm)
 
-        pos_scores = (z[pos_tensor[:, 0]] * z[pos_tensor[:, 1]]).sum(dim=1)
-        neg_scores = (z[neg_tensor[:, 0]] * z[neg_tensor[:, 1]]).sum(dim=1)
+            neg_samples = _negative_samples(num_nodes, set(positives), len(positives))
+            if not neg_samples:
+                break
+            neg_tensor = torch.tensor(neg_samples, dtype=torch.long)
 
-        loss = -torch.log(torch.sigmoid(pos_scores) + 1e-9).mean()
-        loss -= torch.log(1 - torch.sigmoid(neg_scores) + 1e-9).mean()
-        loss.backward()
-        optimizer.step()
+            pos_scores = (z[pos_tensor[:, 0]] * z[pos_tensor[:, 1]]).sum(dim=1)
+            neg_scores = (z[neg_tensor[:, 0]] * z[neg_tensor[:, 1]]).sum(dim=1)
 
+            loss = -torch.log(torch.sigmoid(pos_scores) + 1e-9).mean()
+            loss -= torch.log(1 - torch.sigmoid(neg_scores) + 1e-9).mean()
+            loss.backward()
+            optimizer.step()
+            
+            # Log progress
+            if (epoch + 1) % log_interval == 0 or epoch == 0:
+                print(f"[structural] Epoch {epoch + 1}/{config.epochs}, loss: {loss.item():.4f}")
+
+        print(f"[structural] GAE training completed")
+        
+        # Save the trained model
+        try:
+            model_dir.mkdir(parents=True, exist_ok=True)
+            torch.save({
+                'model_state_dict': model.state_dict(),
+                'optimizer_state_dict': optimizer.state_dict(),
+                'epochs': config.epochs,
+                'hidden_dim': config.hidden_dim,
+                'latent_dim': config.latent_dim,
+                'input_dim': feature_dim,
+            }, model_path)
+            print(f"[structural] Saved GAE model to {model_path}")
+        except Exception as e:
+            print(f"[structural] Warning: Failed to save GAE model: {e}")
+    else:
+        # Model was loaded, still need to compute embeddings
+        adj_norm = _normalize_adjacency(adjacency)
+        x_tensor = torch.from_numpy(node_features.astype(np.float32))
+    
+    # Generate embeddings
     model.eval()
     with torch.no_grad():
         embeddings = model(x_tensor, adj_norm).cpu().numpy()
     faiss.normalize_L2(embeddings)
+    
     return embeddings.astype(np.float32)
 
 
