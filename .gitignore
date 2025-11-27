@@ -19,6 +19,7 @@ env.bak/
 venv.bak/
 .venv/
 .venv
+.env 
 
 # Build / Distribution
 build/
